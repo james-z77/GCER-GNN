@@ -10,6 +10,7 @@ import random
 from time import time
 
 
+
 def gpu(batch, is_long=True, use_cuda=True):
     if is_long:
         batch = t.LongTensor(batch)
@@ -95,7 +96,7 @@ def train(user, item, zu, zi, user_review, item_review):
         end_index = min((batch_num + 1) * args.batch_size, len(item))
         i_sub = []
         iid_batch = []
-        ll = l[start_index:end_index]
+        ll=l[start_index:end_index]
         for i in ll:
             iid_batch.append(i)
             adj_ind, adj_val, node_index, sub = item_review[i]
@@ -187,8 +188,8 @@ if __name__ == '__main__':
     config['n_words'] = data_generator.word_num
     model = RGNN(config=config, args=args)
     mymodel = mygat(config=config, args=args)
-    model = model.t.nn.DataParallel([1, 2, 3])
-    mymodel.t.nn.DataParallel([1, 2, 3])
+    model = model.cuda()
+    mymodel.cuda()
     optimizer1 = optim.Adam(mymodel.parameters(), lr=args.lr,
                             weight_decay=args.l2_re)
     optimizer2 = optim.Adam(model.parameters(), lr=args.lr,
