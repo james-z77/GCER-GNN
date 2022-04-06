@@ -7,8 +7,8 @@ dataset="toys"
 def get_edge():
     uedge_list = set()
     iedge_list = set()
-    a = open('../../data/' + dataset + '/myprocess/userdata_train.csv', 'rb')
-    b = open('../../data/' + dataset + '/myprocess/itemdata_train.csv', 'rb')
+    a = open('../data/' + dataset + '/myprocess/userdata_train.csv', 'rb')
+    b = open('../data/' + dataset + '/myprocess/itemdata_train.csv', 'rb')
     user = pickle.load(a)
     item = pickle.load(b)
     for k in user.keys():
@@ -48,5 +48,5 @@ def generate_graph():
 uedg_index, iedg_index, user, item = generate_graph()
 
 l = [uedg_index, iedg_index, list(user), list(item)]
-a = open('../../data/' + dataset + '/myprocess/graph', 'wb')
+a = open('../data/' + dataset + '/myprocess/graph', 'wb')
 pickle.dump(l, a)

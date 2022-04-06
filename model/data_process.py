@@ -7,6 +7,8 @@ import pickle
 import random
 import sys
 from nltk.stem import PorterStemmer
+import warnings
+warnings.filterwarnings("ignore")
 
 data_type = sys.argv[1]
 ps = PorterStemmer()

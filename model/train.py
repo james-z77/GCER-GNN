@@ -10,7 +10,6 @@ import random
 from time import time
 
 
-
 def gpu(batch, is_long=True, use_cuda=True):
     if is_long:
         batch = t.LongTensor(batch)
@@ -96,7 +95,7 @@ def train(user, item, zu, zi, user_review, item_review):
         end_index = min((batch_num + 1) * args.batch_size, len(item))
         i_sub = []
         iid_batch = []
-        ll=l[start_index:end_index]
+        ll = l[start_index:end_index]
         for i in ll:
             iid_batch.append(i)
             adj_ind, adj_val, node_index, sub = item_review[i]
@@ -126,7 +125,7 @@ def mytrain(uedg_index, iedg_index, user, item, zu, zi, user_id, item_id, rate_)
     uout = t.index_select(t.from_numpy(zu), dim=0, index=user.cpu())
     iout = t.index_select(t.from_numpy(zi), dim=0, index=item.cpu())
     pre = mymodel(uedg_index, iedg_index, user, item, uout, iout, user_id, item_id)
-    loss = loss_function(pre, t.tensor(rate_))
+    loss = loss_function(pre, t.tensor(rate_).cuda())
     print(loss.item() / len(rate_))
     loss.backward()
     optimizer1.step()
@@ -141,7 +140,7 @@ def mytest(uedg_index, iedg_index, user, item, zu, zi, user_id, item_id, rate_):
     uout = t.index_select(t.from_numpy(zu), dim=0, index=user.cpu())
     iout = t.index_select(t.from_numpy(zi), dim=0, index=item.cpu())
     pre = mymodel(uedg_index, iedg_index, user, item, uout, iout, user_id, item_id)
-    loss = loss_function(pre, t.tensor(rate_))
+    loss = loss_function(pre, t.tensor(rate_).cuda())
     print("test")
     print(loss.item() / len(rate_))
     return loss.item() / len(rate_)
@@ -151,7 +150,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--dataset', type=str,
-                        default='games', help='type of dataset')
+                        default='toys', help='type of dataset')
     parser.add_argument('--batch_size', type=int, default=128,
                         help='size of batch of data')
     parser.add_argument('--num_layers', type=int,
@@ -188,7 +187,8 @@ if __name__ == '__main__':
     config['n_words'] = data_generator.word_num
     model = RGNN(config=config, args=args)
     mymodel = mygat(config=config, args=args)
-    model = model.cuda()
+    model = model.nn.DataParallel([1, 2, 3])
+    mymodel.nn.DataParallel([1, 2, 3])
     optimizer1 = optim.Adam(mymodel.parameters(), lr=args.lr,
                             weight_decay=args.l2_re)
     optimizer2 = optim.Adam(model.parameters(), lr=args.lr,

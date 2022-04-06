@@ -11,8 +11,8 @@ from nltk.stem import PorterStemmer
 
 
 def process():
-    dataset="music"
-    path = '../../data/' + dataset + '/pro_data/'
+    dataset="toys"
+    path = '../data/' + dataset + '/pro_data/'
     _type = ['data_train.csv', 'data_valid.csv', 'data_test.csv']
     for x in _type:
         f = open(os.path.join(path + x))
@@ -60,8 +60,8 @@ def process():
                         dst_i[k][u] += 1
                     else:
                         dst_i[k][u] = 1
-        a = open(os.path.join('../../data/' + dataset + '/myprocess/user' + x), 'wb')
-        b = open(os.path.join('../../data/' + dataset + '/myprocess/item' + x), 'wb')
+        a = open(os.path.join('../data/' + dataset + '/myprocess/user' + x), 'wb')
+        b = open(os.path.join('../data/' + dataset + '/myprocess/item' + x), 'wb')
         print(11)
         pickle.dump(dst_u, a)
         pickle.dump(dst_i, b)

@@ -151,13 +151,13 @@ class mygat(nn.Module):
         self.fm2 = FM_Layer(args, config)
 
     def forward(self, uedg_index, iedg_index, user, item, uout1, iout1, user_id, item_id):
-        ugraph = Data(x=uout1.to(t.float32), edge_index=uedg_index.cpu())
-        igraph = Data(x=iout1.to(t.float32), edge_index=iedg_index.cpu())
+        ugraph = Data(x=uout1.cuda().to(t.float32), edge_index=uedg_index)
+        igraph = Data(x=iout1.cuda().to(t.float32), edge_index=iedg_index)
         uout = self.umygat1(ugraph.x, ugraph.edge_index)
         iout = self.imygat1(igraph.x, igraph.edge_index)
         uindex = [int(((user.cpu() == x).nonzero())[0][0]) for x in user_id]
         iindex = [int(((item.cpu() == x).nonzero())[0][0]) for x in item_id]
-        uout = t.index_select(uout, dim=0, index=t.tensor(uindex))
-        iout = t.index_select(iout, dim=0, index=t.tensor(iindex))
-        pre_rate = self.fm2(uout, iout, user_id, item_id)
+        uout = t.index_select(uout, dim=0, index=t.tensor(uindex).cuda())
+        iout = t.index_select(iout, dim=0, index=t.tensor(iindex).cuda())
+        pre_rate = self.fm2(uout.cuda(), iout.cuda(), user_id, item_id)
         return pre_rate
