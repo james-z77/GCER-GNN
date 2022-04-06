@@ -187,8 +187,8 @@ if __name__ == '__main__':
     config['n_words'] = data_generator.word_num
     model = RGNN(config=config, args=args)
     mymodel = mygat(config=config, args=args)
-    model = model.nn.DataParallel([1, 2, 3])
-    mymodel.nn.DataParallel([1, 2, 3])
+    model = model.t.nn.DataParallel([1, 2, 3])
+    mymodel.t.nn.DataParallel([1, 2, 3])
     optimizer1 = optim.Adam(mymodel.parameters(), lr=args.lr,
                             weight_decay=args.l2_re)
     optimizer2 = optim.Adam(model.parameters(), lr=args.lr,
