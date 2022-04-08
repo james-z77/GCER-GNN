@@ -151,8 +151,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--dataset', type=str,
-                        default='toys', help='type of dataset')
-    parser.add_argument('--batch_size', type=int, default=128,
+                        default='music', help='type of dataset')
+    parser.add_argument('--batch_size', type=int, default=1280,
                         help='size of batch of data')
     parser.add_argument('--num_layers', type=int,
                         default=2, help='number of GAT layer')
@@ -181,6 +181,7 @@ if __name__ == '__main__':
     data_generator = GraphData(args)
     test_value_r = 0
     loss_function = t.nn.MSELoss(reduction='sum')
+    
 
     config = dict()
     config['n_users'] = data_generator.n_users
@@ -215,6 +216,7 @@ if __name__ == '__main__':
         rate_test.append(rate[2])
     graph = pickle.load(a)
     uedg_index, iedg_index, user, item = graph[0], graph[1], graph[2], graph[3]
+
     uedg_index = np.array(uedg_index)
     uedg_index = gpu(uedg_index)
     iedg_index = np.array(iedg_index)
