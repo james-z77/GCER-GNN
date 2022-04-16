@@ -9,6 +9,8 @@ import argparse
 import random
 from time import time
 
+t.cuda.set_device(3)
+
 
 def gpu(batch, is_long=True, use_cuda=True):
     if is_long:
@@ -44,8 +46,6 @@ def train_model(data_generator):
     uedg_index, iedg_index, user, item = data_generator.generate_graph()
     user_matrix = t.rand((data_generator.n_users, args.dim))
     item_matrix = t.rand((data_generator.n_items, args.dim))
-    user = [int(i) for i in user]
-    item = [int(i) for i in item]
     uedg_index = np.array(uedg_index)
     uedg_index = gpu(uedg_index)
     iedg_index = np.array(iedg_index)
@@ -53,13 +53,11 @@ def train_model(data_generator):
     user_review, item_review = data_generator.generate_review()
     for epoch in range(1, args.epochs + 1):
         t1 = time()
-        train_mse = train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index,
-                          user, item)
+        train_mse = train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index)
         print('Epoch: ', epoch, '\tTime: ', time() - t1)
         f.write('Epoch: ' + str(epoch) + '\tTime: ' + str(time() - t1) + '\n')
         print("Train Mse Is: ", train_mse)
-        test_mse = test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index,
-                        user, item)
+        test_mse = test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index)
         print("Test Mse Is: ", test_mse)
         f.write("Test Mse Is: " + str(test_mse) + '\n')
         best_cu, stopping_step, should_stop = early_stopping(
@@ -71,21 +69,15 @@ def train_model(data_generator):
     f.close()
 
 
-def find_index(a, b):
-    x = []
-    for i in a:
-        x.append(b.index(i))
-    return x
 
 
-def train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index, user, item):
+def train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index):
     mymodel.train()
     model.train()
-    optimizer1.zero_grad()
-    optimizer2.zero_grad()
     epoch_mse = 0.0
 
     for users_id, items_id, rates in data_generator.generate_batch(args):
+        print(str(len(users_id)) + "/" + str(data_generator.train_length))
         users_id = users_id[-args.batch_size:]
         items_id = items_id[-args.batch_size:]
         rates = rates[-args.batch_size:]
@@ -95,18 +87,10 @@ def train(data_generator, user_matrix, item_matrix, user_review, item_review, ue
 
         for user_id in users_id:
             _, _, _, u_sub = user_review[user_id]
-            for every_single_review in u_sub:
-                for i in range(len(every_single_review)):
-                    if not t.is_tensor(every_single_review[i]):
-                        every_single_review[i] = gpu(every_single_review[i])
             u_sub_list.append(u_sub)
 
         for item_id in items_id:
             _, _, _, i_sub = item_review[item_id]
-            for every_single_review in i_sub:
-                for i in range(len(every_single_review)):
-                    if not t.is_tensor(every_single_review[i]):
-                        every_single_review[i] = gpu(every_single_review[i])
             i_sub_list.append(i_sub)
 
         users_id = gpu(users_id)
@@ -115,16 +99,13 @@ def train(data_generator, user_matrix, item_matrix, user_review, item_review, ue
         user_vc = model(users_id, u_sub_list)
         item_vc = model(items_id, i_sub_list)
 
-        user_index = find_index(users_id, user)
-        item_index = find_index(items_id, item)
-
-        for i, index in enumerate(user_index):
+        for i, index in enumerate(users_id.cpu().detach().numpy()):
             user_matrix[index] = user_vc[i].cpu().detach()
-        for i, index in enumerate(item_index):
+        for i, index in enumerate(items_id.cpu().detach().numpy()):
             item_matrix[index] = item_vc[i].cpu().detach()
 
-        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id, user, item)
-        del user_vc, item_vc, user_index, item_index, users_id, items_id, u_sub_list, i_sub_list
+        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id)
+        del user_vc, item_vc, users_id, items_id, u_sub_list, i_sub_list
         loss = loss_function(pre, rates.to(t.float32))
         epoch_mse += loss.item()
         optimizer1.zero_grad()
@@ -136,20 +117,23 @@ def train(data_generator, user_matrix, item_matrix, user_review, item_review, ue
     return train_mse
 
 
-def test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index, user, item):
+def test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index):
     mymodel.eval()
     model.eval()
     epoch_mse = 0.0
 
     for users_id, items_id, rates in data_generator.generate_batch(args, type='test'):
+        print(str(len(users_id)) + "/" + str(data_generator.test_length))
         users_id = users_id[-args.batch_size:]
         items_id = items_id[-args.batch_size:]
         rates = rates[-args.batch_size:]
+
         rates = gpu(rates)
         u_sub_list, i_sub_list = [], []
 
         for user_id in users_id:
             _, _, _, u_sub = user_review[user_id]
+
             for every_single_review in u_sub:
                 for i in range(len(every_single_review)):
                     if not t.is_tensor(every_single_review[i]):
@@ -170,27 +154,24 @@ def test(data_generator, user_matrix, item_matrix, user_review, item_review, ued
         user_vc = model(users_id, u_sub_list)
         item_vc = model(items_id, i_sub_list)
 
-        user_index = find_index(users_id, user)
-        item_index = find_index(items_id, item)
-
-        for i, index in enumerate(user_index):
+        for i, index in enumerate(users_id.cpu().detach().numpy()):
             user_matrix[index] = user_vc[i].cpu().detach()
-        for i, index in enumerate(item_index):
+        for i, index in enumerate(items_id.cpu().detach().numpy()):
             item_matrix[index] = item_vc[i].cpu().detach()
 
-        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id, user, item)
-        del user_vc, item_vc, user_index, item_index, users_id, items_id, u_sub_list, i_sub_list
+        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id)
+        del user_vc, item_vc, users_id, items_id, u_sub_list, i_sub_list
         with t.no_grad():
             loss = loss_function(pre, rates.to(t.float32))
             epoch_mse += loss.item()
-    train_mse = epoch_mse / data_generator.test_length
-    return train_mse
+    test_mse = epoch_mse / data_generator.test_length
+    return test_mse
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str,
-                        default='music', help='type of dataset')
+                        default='office', help='type of dataset')
 
     parser.add_argument('--batch_size', type=int, default=128,
                         help='size of batch of data')
@@ -214,7 +195,10 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float,
                         default=0.2, help='dropout rate')
     args = parser.parse_known_args()[0]
-    f = open("result" + args.dataset + ".txt", 'w')
+    name = str(args.dataset) + '_' + str(args.batch_size) + '_' + str(args.num_layers) + '_' + str(
+        args.dim) + '_' + str(args.word_dim) + '_' + str(args.hidd_dim) + '_' + str(args.factors) + '_' + str(
+        args.lr) + '_' + str(args.l2_re) + '_' + str(args.epochs) + '_' + str(args.dropout)
+    f = open(name + ".txt", 'w')
     f.write('dataset: ' + args.dataset + '\n')
     f.write('batch_size: ' + str(args.batch_size) + '\n')
     f.write('num_layers: ' + str(args.num_layers) + '\n')

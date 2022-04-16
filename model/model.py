@@ -13,6 +13,18 @@ from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as back
 
 
+def gpu(batch, is_long=True, use_cuda=True):
+    if t.is_tensor(batch):
+        return batch.cuda()
+    if is_long:
+        batch = t.LongTensor(batch)
+    else:
+        batch = t.FloatTensor(batch)
+    if use_cuda:
+        batch = batch.cuda()
+    return batch
+
+
 class RGNN(nn.Module):
     def __init__(self, config, args):
         super().__init__()
@@ -28,12 +40,6 @@ class RGNN(nn.Module):
             [GAT(args.word_dim, args.hidd_dim, num_relation=4)])
         self.conv_i = nn.ModuleList(
             [GAT(args.word_dim, args.hidd_dim, num_relation=4)])
-        self.umygat1 = GATConv(in_channels=args.dim, out_channels=args.dim, dropout=0.5)
-        self.imygat1 = GATConv(in_channels=args.dim, out_channels=args.dim, dropout=0.5)
-        self.umygat2 = GATConv(in_channels=args.dim,
-                               out_channels=args.dim, dropout=0.5)
-        self.imygat2 = GATConv(in_channels=args.dim,
-                               out_channels=args.dim, dropout=0.5)
         self.GRU_layer = nn.GRU(input_size=args.dim, hidden_size=args.dim, batch_first=True, num_layers=3)
         for _ in range(args.num_layers - 1):
             self.conv_u.append(
@@ -65,7 +71,9 @@ class RGNN(nn.Module):
         for u in sub_u:
             seq_len.append(len(u))
             for i in u:
-                ix = self.word_embedding(i[2])
+                ix = self.word_embedding(gpu(i[2]))
+                i[0] = gpu(i[0])
+                i[1] = gpu(i[1])
                 uusub_temp.append(Data(x=ix, edge_index=i[0], edge_attr=i[1].unsqueeze(1)))
 
         usub_graph = self.Batch.from_data_list(uusub_temp)
@@ -145,30 +153,18 @@ class mygat(nn.Module):
                                out_channels=args.dim, dropout=args.dropout)
         self.fm2 = FM_Layer(args, config)
 
-    def find_index(self, a, b):
-        x = []
-        for i in a:
-            x.append(b.index(i))
-        return x
-
-    def forward(self, uedg_index, iedg_index, user_matrix, item_matrix, user_id, item_id, user, item):
+    def forward(self, uedg_index, iedg_index, user_matrix, item_matrix, user_id, item_id):
         ugraph = Data(x=user_matrix.cuda(), edge_index=uedg_index)
         igraph = Data(x=item_matrix.cuda(), edge_index=iedg_index)
 
         iout = self.imygat1(igraph.x, igraph.edge_index)
         uout = self.umygat1(ugraph.x, ugraph.edge_index)
-
+        del ugraph, igraph
         user_matrix = uout.cpu().detach()
         item_matrix = iout.cpu().detach()
 
-        user_index = self.find_index(user_id, user)
-        item_index = self.find_index(item_id, item)
-        user_vc, item_vc = [], []
-        for i, index in enumerate(user_index):
-            user_vc.append(user_matrix[index].cpu().detach().numpy())
-        for i, index in enumerate(item_index):
-            item_vc.append(user_matrix[index].cpu().detach().numpy())
-        user_vc = t.tensor(user_vc).cuda()
-        item_vc = t.tensor(item_vc).cuda()
+        user_vc = t.index_select(user_matrix.cuda(), 0, user_id)
+        item_vc = t.index_select(item_matrix.cuda(), 0, item_id)
         pre_rate = self.fm2(user_vc, item_vc, user_id, item_id)
+        del user_vc, item_vc, uout, iout
         return pre_rate
