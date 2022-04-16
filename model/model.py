@@ -57,13 +57,6 @@ class RGNN(nn.Module):
         init.xavier_uniform_(self.item_embedding.weight)
         init.xavier_uniform_(self.word_embedding.weight)
 
-    def find_index(self, a, b):
-        c = []
-        for i in a:
-            mask = (b == i).type(t.ByteTensor)
-            c.append(t.nonzero(mask))
-        return t.LongTensor(c).cuda()
-
     def forward(self, uid_batch, sub_u):
         self.u_e = self.user_embedding(uid_batch)
         usub_temp = []
@@ -74,7 +67,9 @@ class RGNN(nn.Module):
             for i in u:
                 ix = self.word_embedding(i[2])
                 uusub_temp.append(Data(x=ix, edge_index=i[0], edge_attr=i[1].unsqueeze(1)))
+
         usub_graph = self.Batch.from_data_list(uusub_temp)
+
         u_pool_e = self.conv_pool(usub_graph, self.conv_u)
         index = 0
         for i in range(len(uid_batch)):
@@ -150,14 +145,30 @@ class mygat(nn.Module):
                                out_channels=args.dim, dropout=args.dropout)
         self.fm2 = FM_Layer(args, config)
 
-    def forward(self, uedg_index, iedg_index, user, item, uout1, iout1, user_id, item_id):
-        ugraph = Data(x=uout1.cuda().to(t.float32), edge_index=uedg_index)
-        igraph = Data(x=iout1.cuda().to(t.float32), edge_index=iedg_index)
-        uout = self.umygat1(ugraph.x, ugraph.edge_index)
+    def find_index(self, a, b):
+        x = []
+        for i in a:
+            x.append(b.index(i))
+        return x
+
+    def forward(self, uedg_index, iedg_index, user_matrix, item_matrix, user_id, item_id, user, item):
+        ugraph = Data(x=user_matrix.cuda(), edge_index=uedg_index)
+        igraph = Data(x=item_matrix.cuda(), edge_index=iedg_index)
+
         iout = self.imygat1(igraph.x, igraph.edge_index)
-        uindex = [int(((user.cpu() == x).nonzero())[0][0]) for x in user_id]
-        iindex = [int(((item.cpu() == x).nonzero())[0][0]) for x in item_id]
-        uout = t.index_select(uout, dim=0, index=t.tensor(uindex).cuda())
-        iout = t.index_select(iout, dim=0, index=t.tensor(iindex).cuda())
-        pre_rate = self.fm2(uout.cuda(), iout.cuda(), user_id, item_id)
+        uout = self.umygat1(ugraph.x, ugraph.edge_index)
+
+        user_matrix = uout.cpu().detach()
+        item_matrix = iout.cpu().detach()
+
+        user_index = self.find_index(user_id, user)
+        item_index = self.find_index(item_id, item)
+        user_vc, item_vc = [], []
+        for i, index in enumerate(user_index):
+            user_vc.append(user_matrix[index].cpu().detach().numpy())
+        for i, index in enumerate(item_index):
+            item_vc.append(user_matrix[index].cpu().detach().numpy())
+        user_vc = t.tensor(user_vc).cuda()
+        item_vc = t.tensor(item_vc).cuda()
+        pre_rate = self.fm2(user_vc, item_vc, user_id, item_id)
         return pre_rate

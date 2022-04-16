@@ -109,7 +109,6 @@ class data_process(object):
 
                 edg_value, edg_index, node_list = [], [], []
                 reviews_graphs[i] = (edg_index, edg_value, node_list, sub_graph)
-            print(max)
             return reviews_graphs
 
         self.word2id = dict()

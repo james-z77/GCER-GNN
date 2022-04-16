@@ -6,7 +6,7 @@ import networkx as nx
 import numpy as np
 
 dataset = sys.argv[1]
-threshold = 0.4
+threshold = float(sys.argv[2])
 
 
 def get_edge():
@@ -31,7 +31,28 @@ def get_edge():
     return list(uedge_list), list(iedge_list), user_keys, item_keys
 
 
-uedge_list, iedge_list, user, item = get_edge()
-l = [[[int(c[0]), int(c[1])] for c in uedge_list].reverse(), [[int(c[0]), int(c[1])] for c in iedge_list].reverse(), list(user), list(item)]
+def generate_graph():
+    uedge_list, iedge_list, user, item = get_edge()
+    uG = nx.Graph()
+    iG = nx.Graph()
+    uG.add_nodes_from(user)
+    iG.add_nodes_from(item)
+    uG.add_edges_from(uedge_list)
+    iG.add_edges_from(iedge_list)
+    uadj_matrix = nx.to_scipy_sparse_matrix(uG)
+    iadj_matrix = nx.to_scipy_sparse_matrix(iG)
+    uindex_val = sp.find(uadj_matrix)
+    iindex_val = sp.find(iadj_matrix)
+    uedg_index = np.array([uindex_val[1], uindex_val[0]])
+    iedg_index = np.array([iindex_val[1], iindex_val[0]])
+
+    return uedg_index, iedg_index, uG.nodes, iG.nodes
+
+
+uedg_index, iedg_index, user, item = generate_graph()
+
+l = [uedg_index, iedg_index, list(user), list(item)]
+print(uedg_index.shape)
+print(len(user))
 a = open('../data/' + dataset + '/myprocess/graph', 'wb')
 pickle.dump(l, a)

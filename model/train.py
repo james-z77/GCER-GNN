@@ -10,7 +10,6 @@ import random
 from time import time
 
 
-
 def gpu(batch, is_long=True, use_cuda=True):
     if is_long:
         batch = t.LongTensor(batch)
@@ -37,143 +36,196 @@ def early_stopping(log_value, best_value, test_mse, stopping_step, flag_step=3):
     return best_value, stopping_step, should_stop
 
 
-def train_model(args, uedg_index, iedg_index, user, item, user_id, item_id, rate_, user_review, item_review, user_test,
-                item_test, rate_test):
+def train_model(data_generator):
     print('################Training model###################')
+    f.write('################Training model###################\n')
     stopping_step = 0
     best_cu = None
+    uedg_index, iedg_index, user, item = data_generator.generate_graph()
+    user_matrix = t.rand((data_generator.n_users, args.dim))
+    item_matrix = t.rand((data_generator.n_items, args.dim))
+    user = [int(i) for i in user]
+    item = [int(i) for i in item]
+    uedg_index = np.array(uedg_index)
+    uedg_index = gpu(uedg_index)
+    iedg_index = np.array(iedg_index)
+    iedg_index = gpu(iedg_index)
+    user_review, item_review = data_generator.generate_review()
     for epoch in range(1, args.epochs + 1):
         t1 = time()
-        zu = np.zeros((len(user), args.dim))
-        zi = np.zeros((len(item), args.dim))
-        zu, zi = train(user, item, zu, zi, user_review, item_review)
-        mytrain(uedg_index, iedg_index, user, item, zu, zi, user_id, item_id, rate_)
-
-        test_mse = mytest(uedg_index, iedg_index, user, item, zu, zi, user_test, item_test, rate_test)
-        t2 = time()
-        print('epoch{: d}: train_time:{: .2f}s'.format(
-            epoch, t2 - t1))
+        train_mse = train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index,
+                          user, item)
+        print('Epoch: ', epoch, '\tTime: ', time() - t1)
+        f.write('Epoch: ' + str(epoch) + '\tTime: ' + str(time() - t1) + '\n')
+        print("Train Mse Is: ", train_mse)
+        test_mse = test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index,
+                        user, item)
+        print("Test Mse Is: ", test_mse)
+        f.write("Test Mse Is: " + str(test_mse) + '\n')
         best_cu, stopping_step, should_stop = early_stopping(
-            test_mse, best_cu, test_mse, stopping_step, flag_step=300)
+            test_mse, best_cu, test_mse, stopping_step, flag_step=3)
         if should_stop:
             break
     print('best mse: {:.4f}'.format(test_value_r))
+    f.write('best mse: {:.4f}'.format(test_value_r) + '\n')
+    f.close()
 
 
-def train(user, item, zu, zi, user_review, item_review):
-    iter_num = int(len(user) / args.batch_size) + 1
-    l = list(range(len(user)))
-    np.random.shuffle(l)
-    for batch_num in range(iter_num):
-        start_index = batch_num * args.batch_size
-        end_index = min((batch_num + 1) * args.batch_size, len(user))
-        u_sub = []
-        uid_batch = []
-
-        ll = l[start_index:end_index]
-        for i in ll:
-            uid_batch.append(i)
-            adj_ind, adj_val, node_index, sub = user_review[i]
-            u_sub.append(sub)
-        uid_batch = gpu(uid_batch)
-        sub_u = []
-        for u in u_sub:
-            sub_uu = []
-            for uu in u:
-                sub_uu.append([gpu(it) for it in uu])
-            sub_u.append(sub_uu)
-
-        user_vc = model(uid_batch, sub_u)
-        for i, id in enumerate(uid_batch):
-            it = int(id.cpu())
-            zu[it][:] = user_vc[i].cpu().detach().numpy()
-
-    iter_num = int(len(item) / args.batch_size) + 1
-    l = list(range(len(item)))
-    np.random.shuffle(l)
-    for batch_num in range(iter_num):
-        start_index = batch_num * args.batch_size
-        end_index = min((batch_num + 1) * args.batch_size, len(item))
-        i_sub = []
-        iid_batch = []
-        ll=l[start_index:end_index]
-        for i in ll:
-            iid_batch.append(i)
-            adj_ind, adj_val, node_index, sub = item_review[i]
-            i_sub.append(sub)
-
-        iid_batch = gpu(iid_batch)
-
-        sub_i = []
-        for i in i_sub:
-            sub_ii = []
-            for ii in i:
-                sub_ii.append([gpu(it) for it in ii])
-            sub_i.append(sub_ii)
-        item_vc = model(iid_batch, sub_i)
-        for i, id in enumerate(iid_batch):
-            it = int(id.cpu())
-            zi[it][:] = item_vc[i].cpu().detach().numpy()
-
-    return zu, zi
+def find_index(a, b):
+    x = []
+    for i in a:
+        x.append(b.index(i))
+    return x
 
 
-def mytrain(uedg_index, iedg_index, user, item, zu, zi, user_id, item_id, rate_):
+def train(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index, user, item):
     mymodel.train()
-    optimizer1.zero_grad()
     model.train()
-    optimizer2.zero_grad()
-    uout = t.index_select(t.from_numpy(zu), dim=0, index=user.cpu())
-    iout = t.index_select(t.from_numpy(zi), dim=0, index=item.cpu())
-    pre = mymodel(uedg_index, iedg_index, user, item, uout, iout, user_id, item_id)
-    loss = loss_function(pre, t.tensor(rate_).cuda())
-    print(loss.item() / len(rate_))
-    loss.backward()
-    optimizer1.step()
-    optimizer2.step()
-
-
-def mytest(uedg_index, iedg_index, user, item, zu, zi, user_id, item_id, rate_):
-    mymodel.eval()
     optimizer1.zero_grad()
-    model.eval()
     optimizer2.zero_grad()
-    uout = t.index_select(t.from_numpy(zu), dim=0, index=user.cpu())
-    iout = t.index_select(t.from_numpy(zi), dim=0, index=item.cpu())
-    pre = mymodel(uedg_index, iedg_index, user, item, uout, iout, user_id, item_id)
-    loss = loss_function(pre, t.tensor(rate_).cuda())
-    print("test")
-    print(loss.item() / len(rate_))
-    return loss.item() / len(rate_)
+    epoch_mse = 0.0
+
+    for users_id, items_id, rates in data_generator.generate_batch(args):
+        users_id = users_id[-args.batch_size:]
+        items_id = items_id[-args.batch_size:]
+        rates = rates[-args.batch_size:]
+
+        rates = gpu(rates)
+        u_sub_list, i_sub_list = [], []
+
+        for user_id in users_id:
+            _, _, _, u_sub = user_review[user_id]
+            for every_single_review in u_sub:
+                for i in range(len(every_single_review)):
+                    if not t.is_tensor(every_single_review[i]):
+                        every_single_review[i] = gpu(every_single_review[i])
+            u_sub_list.append(u_sub)
+
+        for item_id in items_id:
+            _, _, _, i_sub = item_review[item_id]
+            for every_single_review in i_sub:
+                for i in range(len(every_single_review)):
+                    if not t.is_tensor(every_single_review[i]):
+                        every_single_review[i] = gpu(every_single_review[i])
+            i_sub_list.append(i_sub)
+
+        users_id = gpu(users_id)
+        items_id = gpu(items_id)
+
+        user_vc = model(users_id, u_sub_list)
+        item_vc = model(items_id, i_sub_list)
+
+        user_index = find_index(users_id, user)
+        item_index = find_index(items_id, item)
+
+        for i, index in enumerate(user_index):
+            user_matrix[index] = user_vc[i].cpu().detach()
+        for i, index in enumerate(item_index):
+            item_matrix[index] = item_vc[i].cpu().detach()
+
+        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id, user, item)
+        del user_vc, item_vc, user_index, item_index, users_id, items_id, u_sub_list, i_sub_list
+        loss = loss_function(pre, rates.to(t.float32))
+        epoch_mse += loss.item()
+        optimizer1.zero_grad()
+        optimizer2.zero_grad()
+        loss.backward()
+        optimizer1.step()
+        optimizer2.step()
+    train_mse = epoch_mse / data_generator.train_length
+    return train_mse
+
+
+def test(data_generator, user_matrix, item_matrix, user_review, item_review, uedg_index, iedg_index, user, item):
+    mymodel.eval()
+    model.eval()
+    epoch_mse = 0.0
+
+    for users_id, items_id, rates in data_generator.generate_batch(args, type='test'):
+        users_id = users_id[-args.batch_size:]
+        items_id = items_id[-args.batch_size:]
+        rates = rates[-args.batch_size:]
+        rates = gpu(rates)
+        u_sub_list, i_sub_list = [], []
+
+        for user_id in users_id:
+            _, _, _, u_sub = user_review[user_id]
+            for every_single_review in u_sub:
+                for i in range(len(every_single_review)):
+                    if not t.is_tensor(every_single_review[i]):
+                        every_single_review[i] = gpu(every_single_review[i])
+            u_sub_list.append(u_sub)
+
+        for item_id in items_id:
+            _, _, _, i_sub = item_review[item_id]
+            for every_single_review in i_sub:
+                for i in range(len(every_single_review)):
+                    if not t.is_tensor(every_single_review[i]):
+                        every_single_review[i] = gpu(every_single_review[i])
+            i_sub_list.append(i_sub)
+
+        users_id = gpu(users_id)
+        items_id = gpu(items_id)
+
+        user_vc = model(users_id, u_sub_list)
+        item_vc = model(items_id, i_sub_list)
+
+        user_index = find_index(users_id, user)
+        item_index = find_index(items_id, item)
+
+        for i, index in enumerate(user_index):
+            user_matrix[index] = user_vc[i].cpu().detach()
+        for i, index in enumerate(item_index):
+            item_matrix[index] = item_vc[i].cpu().detach()
+
+        pre = mymodel(uedg_index, iedg_index, user_matrix, item_matrix, users_id, items_id, user, item)
+        del user_vc, item_vc, user_index, item_index, users_id, items_id, u_sub_list, i_sub_list
+        with t.no_grad():
+            loss = loss_function(pre, rates.to(t.float32))
+            epoch_mse += loss.item()
+    train_mse = epoch_mse / data_generator.test_length
+    return train_mse
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-
     parser.add_argument('--dataset', type=str,
                         default='music', help='type of dataset')
-    parser.add_argument('--batch_size', type=int, default=1280,
+
+    parser.add_argument('--batch_size', type=int, default=128,
                         help='size of batch of data')
     parser.add_argument('--num_layers', type=int,
                         default=2, help='number of GAT layer')
-    parser.add_argument('--dim', type=int, default=8,
+    parser.add_argument('--dim', type=int, default=32,
                         help='dim of user/item embedding')
-    parser.add_argument('--word_dim', type=int, default=16,
+    parser.add_argument('--word_dim', type=int, default=32,
                         help='dim of word embedding')
-    parser.add_argument('--hidd_dim', type=int, default=8,
+    parser.add_argument('--hidd_dim', type=int, default=32,
                         help='dim of graph node in TGAT')
-    parser.add_argument('--factors', type=int, default=16,
+    parser.add_argument('--factors', type=int, default=10,
                         help='dim of bilinear interaction')
 
-    parser.add_argument('--lr', type=float, default=0.01,
+    parser.add_argument('--lr', type=float, default=0.02,
                         help='learning rate')
     parser.add_argument('--l2_re', type=float,
-                        default=1.0, help='weight of l2')
-    parser.add_argument('--epochs', type=int, default=300,
+                        default=0.1, help='weight of l2')
+    parser.add_argument('--epochs', type=int, default=50,
                         help='number of epoch')
     parser.add_argument('--dropout', type=float,
-                        default=0.7, help='dropout rate')
+                        default=0.2, help='dropout rate')
     args = parser.parse_known_args()[0]
+    f = open("result" + args.dataset + ".txt", 'w')
+    f.write('dataset: ' + args.dataset + '\n')
+    f.write('batch_size: ' + str(args.batch_size) + '\n')
+    f.write('num_layers: ' + str(args.num_layers) + '\n')
+    f.write('dim: ' + str(args.dim) + '\n')
+    f.write('word_dim: ' + str(args.word_dim) + '\n')
+    f.write('hidd_dim: ' + str(args.hidd_dim) + '\n')
+    f.write('factors: ' + str(args.factors) + '\n')
+    f.write('lr: ' + str(args.lr) + '\n')
+    f.write('l2_re: ' + str(args.l2_re) + '\n')
+    f.write('epochs: ' + str(args.epochs) + '\n')
+    f.write('dropout: ' + str(args.dropout) + '\n')
     np.random.seed(1999)
     random.seed(1999)
     t.manual_seed(1999)
@@ -181,7 +233,6 @@ if __name__ == '__main__':
     data_generator = GraphData(args)
     test_value_r = 0
     loss_function = t.nn.MSELoss(reduction='sum')
-    
 
     config = dict()
     config['n_users'] = data_generator.n_users
@@ -195,40 +246,5 @@ if __name__ == '__main__':
                             weight_decay=args.l2_re)
     optimizer2 = optim.Adam(model.parameters(), lr=args.lr,
                             weight_decay=args.l2_re)
-    a = open('../data/' + args.dataset + '/myprocess/graph', 'rb')
-    b = open('../data/' + args.dataset + '/data.train', 'rb')
-    c = open('../data/' + args.dataset + '/data.user_graphs', 'rb')
-    d = open('../data/' + args.dataset + '/data.item_graphs', 'rb')
-    e = open('../data/' + args.dataset + '/data.test', 'rb')
-    rates = pickle.load(b)
-    rates_test = pickle.load(e)
-    user_review = pickle.load(c)
-    item_review = pickle.load(d)
-    user_id, item_id, rate_ = [], [], []
-    for rate in rates:
-        user_id.append(rate[0])
-        item_id.append(rate[1])
-        rate_.append(rate[2])
-    user_test, item_test, rate_test = [], [], []
-    for rate in rates_test:
-        user_test.append(rate[0])
-        item_test.append(rate[1])
-        rate_test.append(rate[2])
-    graph = pickle.load(a)
-    uedg_index, iedg_index, user, item = graph[0], graph[1], graph[2], graph[3]
 
-    uedg_index = np.array(uedg_index)
-    uedg_index = gpu(uedg_index)
-    iedg_index = np.array(iedg_index)
-    print(uedg_index.shape)
-    print(iedg_index.shape)
-    iedg_index = gpu(iedg_index)
-    user = gpu([int(x) for x in user])
-    item = gpu([int(x) for x in item])
-    try:
-        train_model(args, uedg_index, iedg_index, user, item, user_id, item_id, rate_, user_review, item_review,
-                    user_test, item_test, rate_test)
-    except Exception as ex:
-        template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-        message = template.format(type(ex).__name__, ex.args)
-        print(message)
+    train_model(data_generator)
