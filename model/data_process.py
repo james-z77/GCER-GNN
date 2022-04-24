@@ -7,11 +7,10 @@ import pickle
 import random
 import sys
 from nltk.stem import PorterStemmer
-import warnings
-warnings.filterwarnings("ignore")
 
 data_type = sys.argv[1]
 ps = PorterStemmer()
+# tokenizer = nltk.tokenize.RegexpTokenizer(r'\w+')
 stopWords = set(stopwords.words('english'))
 tags = ['NN', 'NNS', 'NNP', 'NNPS', 'JJ', 'JJR', 'JJS',
         'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', 'PRP']
@@ -47,23 +46,17 @@ class data_process(object):
         item_reviews = {}
         for line in train_data.values:
             if int(line[0]) in user_reviews:
-                user_reviews[int(line[0])].append([int(line[4]), line[2]])
+                user_reviews[int(line[0])].append(line[2])
                 user_rid[int(line[0])].append(int(line[1]))
             else:
-                user_reviews[int(line[0])] = [[int(line[4]), line[2]]]
+                user_reviews[int(line[0])] = [line[2]]
                 user_rid[int(line[0])] = [int(line[1])]
             if int(line[1]) in item_reviews:
-                item_reviews[int(line[1])].append([int(line[4]), line[2]])
+                item_reviews[int(line[1])].append(line[2])
                 item_rid[int(line[1])].append(int(line[0]))
             else:
-                item_reviews[int(line[1])] = [[int(line[4]), line[2]]]
+                item_reviews[int(line[1])] = [line[2]]
                 item_rid[int(line[1])] = [int(line[0])]
-        for keys in user_reviews.keys():
-            a = np.asarray(sorted(user_reviews[keys], key=lambda x: x[0]))
-            user_reviews[keys] = list(a[:, 1])
-        for keys in item_reviews.keys():
-            a = np.asarray(sorted(item_reviews[keys], key=lambda x: x[0]))
-            item_reviews[keys] = list(a[:, 1])
         return user_reviews, item_reviews, user_rid, item_rid
 
     def data_load(self, data):
@@ -83,7 +76,6 @@ class data_process(object):
         items_id = []
         reviews = []
         rates = []
-        time = []
         print('start extracting data...')
         for line in f:
             js = json.loads(line)
@@ -95,24 +87,19 @@ class data_process(object):
             items_id.append(str(js['asin']))
             reviews.append(js['reviewText'])
             rates.append(js['overall'])
-            time.append(int(js['unixReviewTime']))
-
-        data = \
-            pd.DataFrame(
-                {'users_id': users_id, 'items_id': items_id, 'reviews': reviews, 'rates': rates, 'time': time})[
-                ['users_id', 'items_id', 'reviews', 'rates', 'time']]
-
+        data = pd.DataFrame({'users_id': users_id, 'items_id': items_id, 'reviews': reviews, 'rates': rates})[
+            ['users_id', 'items_id', 'reviews', 'rates']]
         print('number of interaction:', data.shape[0])
         users_count = get_count(data, 'users_id')
         items_count = get_count(data, 'items_id')
         unique_users = users_count['users_id']
-        unique_items = items_count["items_id"]
+        unique_items = items_count['items_id']
         self.user2id = dict((x, i) for (i, x) in enumerate(unique_users))
         self.item2id = dict((x, i) for (i, x) in enumerate(unique_items))
+
         data = self.numb_id(data)
         train_df = pd.DataFrame(
             columns=['users_id', 'items_id', 'reviews', 'rates'])
-
         for user in range(len(self.user2id)):
             if user not in train_df['users_id'].values:
                 ddf = data[data.users_id.isin([user])].iloc[[0]]
@@ -123,16 +110,16 @@ class data_process(object):
                 ddf = data[data.items_id.isin([item])].iloc[[0]]
                 train_df = train_df.append(ddf)
                 data.drop(ddf.index, inplace=True)
-
         print('start splitting dataset...')
+        # shuffle data and select train set,test set and validation set
         data_len = data.shape[0]
         index = np.random.permutation(data_len)
         data = data.iloc[index]
-        train_data = data.head(int(data_len * 0.8))
+        train_data = data.head(int(data_len * 0.8) - train_df.shape[0])
         train_data = pd.concat([train_data, train_df], axis=0)
         tv_data = data.tail(int(data_len * 0.2))
-        test_data = tv_data
         valid_data = tv_data.head(int(data_len * 0.1))
+        # get reviews of each user and item
         print('start collect reviews for users and items...')
         user_reviews, item_reviews, user_rid, item_rid = self.data_review(
             train_data)
@@ -140,7 +127,7 @@ class data_process(object):
         assert len(item_reviews) == len(self.item2id)
         print('start saving...')
         train_data1 = train_data[['users_id', 'items_id', 'rates']]
-        test_data2 = test_data[['users_id', 'items_id', 'rates']]
+        test_data2 = tv_data[['users_id', 'items_id', 'rates']]
         valid_data1 = valid_data[['users_id', 'items_id', 'rates']]
         train_data1.to_csv(os.path.join(
             self.data_dir, 'data_train.csv'), index=False, header=None)
@@ -160,8 +147,8 @@ class data_process(object):
 
 
 if __name__ == '__main__':
-    np.random.seed(526)
-    random.seed(526)
+    np.random.seed(2020)
+    random.seed(2020)
     path = '../data/' + data_type + '/pro_data/'
     ensureDir(path)
     Data_process = data_process(path)

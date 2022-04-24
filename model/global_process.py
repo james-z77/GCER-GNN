@@ -27,7 +27,7 @@ def process():
                 dist_item[line[1]] = set_item
         user_keys = list(dist_user.keys())
         user_number = len(user_keys)
-        user_matrix = np.zeros([user_number, user_number])
+        user_matrix = np.identity(user_number)
         for i in range(user_number):
             for j in range(i):
                 if i == j or len(dist_user[user_keys[i]].union(dist_user[user_keys[j]])) == 0:
@@ -40,7 +40,7 @@ def process():
                     user_matrix[j][i] = jaccard
         item_keys = list(dist_item.keys())
         item_number = len(item_keys)
-        item_matrix = np.zeros([item_number, item_number])
+        item_matrix = np.identity(item_number)
         for i in range(item_number):
             for j in range(i):
                 if i == j or len(dist_item[item_keys[i]].union(dist_item[item_keys[j]])) == 0:

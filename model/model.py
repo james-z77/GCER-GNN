@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 import torch_geometric.data as gda
 from torch_geometric.nn import global_max_pool as gmp
 from torch_geometric.nn import GATConv
-from layer import GraphPool
+from layer import GraphPool, GAT_LAYER
 from layer import GAT
 from torch.nn.utils.rnn import pad_sequence as pad
 from torch.nn.utils.rnn import pack_padded_sequence as pack
@@ -55,15 +55,15 @@ class RGNN(nn.Module):
         self.interaction_u = nn.Linear(args.dim, args.dim)
         self.interaction_i = nn.Linear(args.dim, args.dim)
         self.fm2 = FM_Layer(args, config)
-        self.pool = GraphPool(args.hidd_dim)
         self.Batch = gda.Batch()
         self.Dropout = nn.Dropout(args.dropout)
+        self.MYGAT = gat(config, args)
 
         init.xavier_uniform_(self.user_embedding.weight)
         init.xavier_uniform_(self.item_embedding.weight)
         init.xavier_uniform_(self.word_embedding.weight)
 
-    def forward(self, uid_batch, sub_u):
+    def step(self, uid_batch, sub_u):
         self.u_e = self.user_embedding(uid_batch)
         usub_temp = []
         uusub_temp = []
@@ -96,24 +96,26 @@ class RGNN(nn.Module):
         user_vc = t.stack(user_vc, dim=0)
         return user_vc
 
+    def forward(self, uid_batch, sub_u, iid_batch, sub_i, uedg_index, iedg_index,uedg_value, iedg_value):
+        user_vc1 = self.step(uid_batch, sub_u)
+        item_vc1 = self.step(iid_batch, sub_i)
+        user_vc2, item_vc2 = self.MYGAT(uedg_index, iedg_index, uid_batch, iid_batch,uedg_value, iedg_value)
+        user_vc = t.cat((user_vc1, user_vc2), -1)
+        item_vc = t.cat((item_vc1, item_vc2), -1)
+        pre_rate = self.fm2(user_vc, item_vc, uid_batch, iid_batch)
+        return pre_rate
+
     def conv_pool(self, graph, conv_ui):
-        pool_e = []
         review_e, edge_index, edge_attr, batch = graph.x, graph.edge_index, graph.edge_attr, graph.batch.cuda()  # graph.batch用于标注每个节点属于第几个图
-        for i in range(self.args.num_layers):
-            review_e = conv_ui[i](
-                review_e, batch, edge_index, edge_attr.squeeze())
-        review_e, edge_index, edge_attr, batch, _ = self.pool(review_e, edge_index, edge_attr, batch)
+        review_e = conv_ui[0](review_e, batch, edge_index, edge_attr.squeeze())
         out = gmp(review_e, batch)
-        out = t.relu(self.trans_w[i](out))
-        pool_e.append(out)
-        out_e = t.cat(pool_e, -1)
-        return out_e
+        return out
 
 
 class FM_Layer(nn.Module):
     def __init__(self, args, config):
         super(FM_Layer, self).__init__()
-        input_dim = args.dim * 2
+        input_dim = args.dim * 4
         self.linear = nn.Linear(input_dim, 1, bias=False)
         self.V = nn.Parameter(
             t.zeros(input_dim, input_dim), requires_grad=True)
@@ -143,28 +145,31 @@ class FM_Layer(nn.Module):
         return self.fm_layer(user_em, item_em, uid, iid).view(-1)
 
 
-class mygat(nn.Module):
+class gat(nn.Module):
     def __init__(self, config, args):
         super().__init__()
         self.args = args
-        self.umygat1 = GATConv(in_channels=args.dim,
-                               out_channels=args.dim, dropout=args.dropout)
-        self.imygat1 = GATConv(in_channels=args.dim,
-                               out_channels=args.dim, dropout=args.dropout)
-        self.fm2 = FM_Layer(args, config)
+        self.umygat1 = GAT_LAYER(in_channels=args.dim,
 
-    def forward(self, uedg_index, iedg_index, user_matrix, item_matrix, user_id, item_id):
-        ugraph = Data(x=user_matrix.cuda(), edge_index=uedg_index)
-        igraph = Data(x=item_matrix.cuda(), edge_index=iedg_index)
+                                 out_channels=args.dim, dropout=args.dropout)
+        self.imygat1 = GAT_LAYER(in_channels=args.dim,
+                                 out_channels=args.dim, dropout=args.dropout)
+        self.umygat2 = GAT_LAYER(in_channels=args.dim,
+                                 out_channels=args.dim, dropout=args.dropout)
+        self.imygat2 = GAT_LAYER(in_channels=args.dim,
+                                 out_channels=args.dim, dropout=args.dropout)
+        self.user_matrix = t.nn.Parameter(gpu(t.rand((config['n_users'], args.dim)), is_long=False), requires_grad=True)
 
-        iout = self.imygat1(igraph.x, igraph.edge_index)
-        uout = self.umygat1(ugraph.x, ugraph.edge_index)
-        del ugraph, igraph
-        user_matrix = uout.cpu().detach()
-        item_matrix = iout.cpu().detach()
+        self.item_matrix = t.nn.Parameter(gpu(t.rand((config['n_items'], args.dim)), is_long=False), requires_grad=True)
 
-        user_vc = t.index_select(user_matrix.cuda(), 0, user_id)
-        item_vc = t.index_select(item_matrix.cuda(), 0, item_id)
-        pre_rate = self.fm2(user_vc, item_vc, user_id, item_id)
-        del user_vc, item_vc, uout, iout
-        return pre_rate
+    def forward(self, uedg_index, iedg_index, user_id, item_id, uedg_value, iedg_value):
+        ugraph = Data(x=self.user_matrix, edge_index=uedg_index)
+        igraph = Data(x=self.item_matrix, edge_index=iedg_index)
+
+        iout = self.imygat1(igraph.x, igraph.edge_index, iedg_value)
+        uout = self.umygat1(ugraph.x, ugraph.edge_index, uedg_value)
+        iout = self.imygat2(iout, igraph.edge_index, iedg_value)
+        uout = self.umygat2(uout, ugraph.edge_index, uedg_value)
+        user_vc = t.index_select(uout, 0, user_id)
+        item_vc = t.index_select(iout, 0, item_id)
+        return user_vc, item_vc

@@ -86,4 +86,48 @@ class GAT(MessagePassing):
         return '{}({}, {})'.format(self.__class__.__name__, self.channels, self.channels)
 
 
+class GAT_LAYER(MessagePassing):
+    def __init__(self, in_channels, out_channels, negative_slope=0.2, dropout=0, **kwargs):
+        super(GAT_LAYER, self).__init__(aggr='add', **kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.negative_slope = negative_slope
+        self.dropout = dropout
+
+        self.weight = Parameter(
+            torch.Tensor(in_channels, out_channels))
+        self.weight1 = Parameter(
+            torch.Tensor(in_channels, out_channels))
+        self.weight2 = Parameter(
+            torch.Tensor(in_channels, out_channels))
+
+        init.xavier_uniform_(self.weight.data)
+        init.xavier_uniform_(self.weight1.data)
+        init.xavier_uniform_(self.weight2.data)
+
+    def forward(self, x, edge_index, edge_attr, size=None):
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr, size=size)
+
+    def message(self, edge_index_i, x_i, x_j, size_i, edge_attr):
+        x_1 = torch.matmul(x_i, self.weight1)
+        x_r = torch.matmul(torch.transpose(x_j, 0, 1), edge_attr.reshape(-1, 1))
+        x_r= torch.transpose(x_r, 0, 1)
+        x_2 = torch.matmul(x_r, self.weight2)
+        x_2 = torch.transpose(x_2, 0, 1)
+        alpha = torch.matmul(x_1, x_2)
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        alpha = softmax(alpha, edge_index_i, size_i)
+
+        # Sample attention coefficients stochastically.
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+        return torch.matmul(x_j, self.weight) * alpha.view(-1, 1)
+
+    def update(self, aggr_out, x):
+        return aggr_out
+
+    def __repr__(self):
+        return '{}({}, {})'.format(self.__class__.__name__, self.channels, self.channels)
+
+
 

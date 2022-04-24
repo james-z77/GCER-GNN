@@ -64,5 +64,6 @@ class GraphData:
 
     def generate_graph(self):
         graph = self.load_data(self.global_graphs_file)
-        uedg_index, iedg_index, user, item = graph[0], graph[1], graph[2], graph[3]
-        return uedg_index, iedg_index, user, item
+        uedg_index, iedg_index, uedg_value, iedg_value,user, item = graph[0], graph[1], graph[2], graph[3], graph[4], \
+                                                                     graph[5]
+        return uedg_index, iedg_index, user, item,uedg_value, iedg_value
